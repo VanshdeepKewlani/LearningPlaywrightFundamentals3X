@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Playwright Architecture — Deep Dive</title>
+<style>
+  :root {
+    --bg: #07111f; --panel: #0d1b2e; --panel2:#10243a; --text:#e8f0f8;
+    --muted:#9db0c5; --accent:#63e6be; --accent2:#74c0fc; --warn:#ffd166;
+    --danger:#ff7b7b; --line:#23405d; --code:#06101b;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { margin:0; font-family:Inter,Segoe UI,Arial,sans-serif; background:linear-gradient(180deg,#06101c,#091727 55%,#07111f); color:var(--text); line-height:1.55; }
+  header { position:sticky; top:0; z-index:20; backdrop-filter:blur(14px); background:rgba(7,17,31,.88); border-bottom:1px solid var(--line); }
+  .nav { max-width:1250px; margin:auto; display:flex; align-items:center; justify-content:space-between; padding:14px 22px; }
+  .brand { font-weight:800; letter-spacing:.3px; }
+  .brand span { color:var(--accent); }
+  nav a { color:var(--muted); text-decoration:none; margin-left:18px; font-size:13px; }
+  nav a:hover { color:var(--text); }
+  main { max-width:1250px; margin:auto; padding:42px 22px 80px; }
+  .hero { display:grid; grid-template-columns:1.35fr .65fr; gap:28px; align-items:center; padding:45px 0 35px; }
+  h1 { font-size:clamp(38px,6vw,72px); line-height:1.02; margin:0 0 18px; letter-spacing:-2px; }
+  h1 em { color:var(--accent); font-style:normal; }
+  .lead { color:var(--muted); font-size:18px; max-width:760px; }
+  .hero-card { background:linear-gradient(145deg,var(--panel2),var(--panel)); border:1px solid var(--line); border-radius:18px; padding:24px; box-shadow:0 20px 60px rgba(0,0,0,.25); }
+  .metric { display:flex; justify-content:space-between; border-bottom:1px solid var(--line); padding:13px 0; }
+  .metric:last-child { border-bottom:0; }
+  .metric b { color:var(--accent); }
+  section { margin-top:42px; scroll-margin-top:85px; }
+  h2 { font-size:31px; margin-bottom:8px; }
+  h3 { margin-top:26px; color:var(--accent2); }
+  .sub { color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  .grid.two { grid-template-columns:repeat(2,1fr); }
+  .card { background:rgba(13,27,46,.86); border:1px solid var(--line); border-radius:14px; padding:20px; }
+  .card strong { color:var(--text); }
+  .diagram { background:#06101b; border:1px solid var(--line); border-radius:16px; padding:22px; overflow:auto; }
+  .layer { display:grid; grid-template-columns:170px 1fr; border:1px solid var(--line); margin:10px 0; border-radius:10px; overflow:hidden; }
+  .layer .name { padding:15px; background:#0b2034; color:var(--accent); font-weight:700; }
+  .layer .body { padding:15px; color:#c8d6e5; }
+  .arrow { text-align:center; color:var(--warn); font-size:20px; }
+  pre { background:var(--code); border:1px solid var(--line); border-radius:12px; padding:18px; overflow:auto; color:#d9e6f2; font-size:13px; }
+  code { font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace; }
+  .pill { display:inline-block; border:1px solid #2d526e; border-radius:999px; padding:4px 9px; margin:3px; color:#b9d5e9; font-size:12px; }
+  .good { color:var(--accent); } .warn { color:var(--warn); } .bad { color:var(--danger); }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border-radius:12px; overflow:hidden; }
+  th,td { padding:12px 14px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--accent); background:#0b2034; }
+  .callout { border-left:4px solid var(--accent); background:#0a1d2a; padding:16px 18px; border-radius:8px; margin:18px 0; }
+  .qa { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .qa div { background:var(--panel); border:1px solid var(--line); padding:17px; border-radius:12px; }
+  footer { border-top:1px solid var(--line); color:var(--muted); text-align:center; padding:30px; }
+  @media(max-width:850px) {
+    .hero,.grid,.grid.two,.qa { grid-template-columns:1fr; }
+    nav { display:none; }
+    .layer { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="nav">
+    <div class="brand">Playwright <span>Architecture Deep Dive</span></div>
+    <nav>
+      <a href="#mental-model">Mental Model</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#framework">Framework</a>
+      <a href="#ci">CI/CD</a>
+      <a href="#tradeoffs">Trade-offs</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero" id="mental-model">
+  <div>
+    <div class="pill">Automation Architect / SDET</div>
+    <div class="pill">UI + API + Data</div>
+    <div class="pill">Parallel + CI-first</div>
+    <h1>Playwright<br><em>Architecture</em></h1>
+    <p class="lead">A practical deep dive into designing an enterprise-grade Playwright automation platform: browser isolation, fixtures, page objects, test data, authentication, API setup, parallel execution, sharding, observability, reliability and CI/CD.</p>
+  </div>
+  <div class="hero-card">
+    <div class="metric"><span>Test runner</span><b>@playwright/test</b></div>
+    <div class="metric"><span>Isolation</span><b>BrowserContext</b></div>
+    <div class="metric"><span>Parallelism</span><b>Workers + shards</b></div>
+    <div class="metric"><span>Auth</span><b>storageState / API</b></div>
+    <div class="metric"><span>Design</span><b>Fixtures + POM</b></div>
+  </div>
+</section>
+
+<section id="architecture">
+  <h2>1. Enterprise architecture</h2>
+  <p class="sub">Think in layers. The goal is not “more automation”; it is a maintainable quality platform with controlled dependencies.</p>
+  <div class="diagram">
+    <div class="layer"><div class="name">CI / Quality Gate</div><div class="body">GitHub Actions / Jenkins → install → lint → test → parallel shards → reports → quality gate → deployment decision</div></div>
+    <div class="arrow">↓</div>
+    <div class="layer"><div class="name">Playwright Test</div><div class="body">Projects, workers, retries, timeouts, fixtures, hooks, annotations, tags, reporters</div></div>
+    <div class="arrow">↓</div>
+    <div class="layer"><div class="name">Test Layer</div><div class="body">Business scenarios, assertions, test steps, test data references — keep business intent visible</div></div>
+    <div class="arrow">↓</div>
+    <div class="layer"><div class="name">Domain Layer</div><div class="body">Page Objects / components / API clients / service objects — expose actions, not raw locators</div></div>
+    <div class="arrow">↓</div>
+    <div class="layer"><div class="name">Platform Layer</div><div class="body">Fixtures, auth state, environment config, test-data factory, logging, API utilities, DB helpers</div></div>
+    <div class="arrow">↓</div>
+    <div class="layer"><div class="name">System Under Test</div><div class="body">Web UI ↔ APIs ↔ services ↔ databases / data lake / external dependencies</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>2. What actually happens during a test?</h2>
+  <div class="grid">
+    <div class="card"><h3>Worker</h3><p>A worker process executes tests. Parallel workers allow independent tests to run concurrently.</p></div>
+    <div class="card"><h3>Browser</h3><p>A browser process hosts Chromium, Firefox or WebKit. Avoid treating the browser as the isolation boundary.</p></div>
+    <div class="card"><h3>Context</h3><p>A BrowserContext is an isolated browser session with separate cookies, storage and permissions.</p></div>
+  </div>
+  <div class="callout"><b>Architectural rule:</b> Prefer <span class="good">Context isolation</span> over creating a browser for every test. It is usually cheaper and gives strong test isolation.</div>
+  <pre><code>worker
+ └── browser
+      ├── context → test A → page(s)
+      ├── context → test B → page(s)
+      └── context → test C → page(s)
+
+Test isolation ≠ new browser process for every test.</code></pre>
+</section>
+
+<section id="framework">
+  <h2>3. Recommended project structure</h2>
+  <pre><code>playwright-framework/
+├── tests/
+│   ├── ui/
+│   ├── api/
+│   ├── integration/
+│   └── smoke/
+├── pages/
+│   ├── LoginPage.js
+│   ├── DashboardPage.js
+│   └── components/
+├── api/
+│   ├── UsersClient.js
+│   └── OrdersClient.js
+├── fixtures/
+│   ├── test.js
+│   └── auth.fixture.js
+├── data/
+│   ├── factories/
+│   └── schemas/
+├── utils/
+│   ├── config.js
+│   ├── logger.js
+│   └── db.js
+├── auth/
+│   └── storage/
+├── playwright.config.js
+└── package.json</code></pre>
+
+  <div class="grid">
+    <div class="card"><strong>Tests</strong><p>Describe behavior and business intent. Avoid implementation details.</p></div>
+    <div class="card"><strong>Pages / Components</strong><p>Encapsulate UI actions and selectors. A page object should say <code>checkout()</code>, not expose every CSS selector.</p></div>
+    <div class="card"><strong>Fixtures</strong><p>Compose reusable setup, dependencies and test-scoped resources without creating inheritance-heavy base classes.</p></div>
+  </div>
+
+  <h3>Fixture composition</h3>
+  <pre><code>import { test as base } from '@playwright/test';
+
+export const test = base.extend({
+  apiClient: async ({ request }, use) => {
+    const client = new UsersClient(request);
+    await use(client);
+  },
+
+  loggedInPage: async ({ browser }, use) => {
+    const context = await browser.newContext({
+      storageState: 'auth/storage/user.json'
+    });
+    const page = await context.newPage();
+    await use(page);
+    await context.close();
+  }
+});
+
+export { expect } from '@playwright/test';</code></pre>
+</section>
+
+<section>
+  <h2>4. Page Object Model: the architect's version</h2>
+  <div class="grid two">
+    <div class="card"><h3 class="good">Good</h3>
+      <pre><code>await checkoutPage
+  .addProduct('Laptop')
+  .proceedToPayment()
+  .placeOrder();</code></pre>
+      <p>The test reads like a business workflow. Locators remain inside the page/component layer.</p>
+    </div>
+    <div class="card"><h3 class="bad">Avoid</h3>
+      <pre><code>await page.locator(
+  '#root div:nth-child(4) button'
+).click();</code></pre>
+      <p>Raw selectors in tests couple business scenarios to UI implementation.</p>
+    </div>
+  </div>
+  <div class="callout"><b>Trade-off:</b> POM adds abstraction. That is valuable when workflows and selectors are reused, but excessive POM can hide test intent. Use page/component objects around meaningful behavior, not every DOM node.</div>
+</section>
+
+<section>
+  <h2>5. Authentication and state</h2>
+  <div class="grid">
+    <div class="card"><h3>Best for scale</h3><p>Authenticate once through an API or setup project and reuse <code>storageState</code>.</p></div>
+    <div class="card"><h3>Isolation</h3><p>Use separate contexts and, where necessary, separate user identities for tests that mutate state.</p></div>
+    <div class="card"><h3>Security</h3><p>Never commit credentials or generated auth state containing sensitive secrets. Inject secrets through CI.</p></div>
+  </div>
+  <pre><code>// global/setup style concept
+await request.post('/login', {
+  data: { username: process.env.USER, password: process.env.PASSWORD }
+});
+
+// Save authenticated state
+await context.storageState({ path: 'auth/storage/user.json' });
+
+// Test config can consume that state
+use: {
+  storageState: 'auth/storage/user.json'
+}</code></pre>
+  <div class="callout"><b>Key principle:</b> Do not make every UI test pay the cost of a UI login unless login itself is the behavior being tested.</div>
+</section>
+
+<section>
+  <h2>6. UI + API + database: hybrid testing</h2>
+  <div class="diagram">
+    <div class="layer"><div class="name">UI</div><div class="body">Validate critical user journeys, rendering, navigation and integration behavior.</div></div>
+    <div class="arrow">↕</div>
+    <div class="layer"><div class="name">API</div><div class="body">Create data, perform fast setup, validate contracts, negative cases and service behavior.</div></div>
+    <div class="arrow">↕</div>
+    <div class="layer"><div class="name">Data</div><div class="body">Validate persistence, ETL transformations and business rules with controlled DB/query helpers.</div></div>
+  </div>
+  <div class="callout"><b>Architectural trade-off:</b> UI tests give high confidence in real user flows but are slower and more fragile. API/data tests are faster and easier to diagnose. Put most coverage at the lower layers and reserve UI automation for high-value journeys.</div>
+</section>
+
+<section id="ci">
+  <h2>7. Scaling: workers, parallelism and sharding</h2>
+  <p class="sub">If a 5,000-test suite takes 4 hours, simply increasing workers is not enough. First measure test duration, dependencies, fixture cost, serial constraints and flake rate.</p>
+  <table>
+    <tr><th>Technique</th><th>Purpose</th><th>Trade-off</th></tr>
+    <tr><td>Workers</td><td>Run independent tests concurrently on a machine</td><td>More CPU/RAM; too many workers can overload the SUT</td></tr>
+    <tr><td>Sharding</td><td>Split suite across CI machines</td><td>Infrastructure cost and balancing complexity</td></tr>
+    <tr><td>Projects</td><td>Run browser/device/config variants</td><td>Multiplies execution volume</td></tr>
+    <tr><td>Retries</td><td>Protect pipeline from transient failures</td><td>Can hide real flakiness; never use as the primary fix</td></tr>
+    <tr><td>Smoke tags</td><td>Fast release confidence</td><td>Smaller signal can miss broader regression defects</td></tr>
+  </table>
+  <pre><code>// Example CI strategy
+Shard 1 ─┐
+Shard 2 ─┤
+Shard 3 ─┼──► Playwright tests ─► merge reports ─► quality gate
+Shard 4 ─┤
+Shard 5 ─┘
+
+Target = balance test duration, worker capacity and application capacity.</code></pre>
+</section>
+
+<section>
+  <h2>8. Flakiness: diagnose before retrying</h2>
+  <div class="grid">
+    <div class="card"><h3>Async application</h3><p>Prefer locator assertions and condition-based waits over arbitrary sleeps.</p></div>
+    <div class="card"><h3>Test data collision</h3><p>Generate unique data or isolate accounts/resources per worker.</p></div>
+    <div class="card"><h3>Environment instability</h3><p>Separate product failures from infrastructure failures using logs, traces and API health evidence.</p></div>
+  </div>
+  <pre><code>// Prefer
+await expect(page.getByRole('button', { name: 'Submit' }))
+  .toBeEnabled();
+
+// Avoid
+await page.waitForTimeout(5000);</code></pre>
+  <div class="callout"><b>Reliability rule:</b> Retry is a containment mechanism, not a defect fix. Track retry rate and quarantined tests as engineering metrics.</div>
+</section>
+
+<section>
+  <h2>9. Observability and debugging</h2>
+  <div class="grid">
+    <div class="card"><strong>Trace</strong><p>Use traces for action history, screenshots, DOM snapshots and timing context.</p></div>
+    <div class="card"><strong>Video / screenshot</strong><p>Capture on failure or for selected CI runs where storage cost is justified.</p></div>
+    <div class="card"><strong>HTML / CI reports</strong><p>Make failures searchable by suite, tag, browser, commit, owner and failure category.</p></div>
+  </div>
+  <div class="callout"><b>Architect metric set:</b> pass rate, flaky rate, retry rate, median/P95 test duration, suite duration, defect escape rate and infrastructure failure rate.</div>
+</section>
+
+<section>
+  <h2>10. Quality gates</h2>
+  <table>
+    <tr><th>Signal</th><th>Example gate</th></tr>
+    <tr><td>Smoke</td><td class="good">100% pass before deployment</td></tr>
+    <tr><td>Critical / High defects</td><td class="good">Zero open release blockers</td></tr>
+    <tr><td>Flaky tests</td><td class="warn">Trend monitored; threshold agreed with team</td></tr>
+    <tr><td>API / contract</td><td class="good">Critical contract checks pass</td></tr>
+    <tr><td>Performance</td><td class="warn">Key endpoints within agreed SLA/SLO</td></tr>
+    <tr><td>Security</td><td class="good">No release-blocking findings</td></tr>
+  </table>
+</section>
+
+<section id="tradeoffs">
+  <h2>11. Architect trade-offs you should be ready to explain</h2>
+  <div class="qa">
+    <div><strong>Fixtures vs base classes</strong><p>Fixtures favor composition and scoped setup. Base classes can be simpler initially but tend to create inheritance coupling.</p></div>
+    <div><strong>API login vs UI login</strong><p>API setup is much faster and reduces UI dependency. Keep dedicated UI-login tests for the login feature itself.</p></div>
+    <div><strong>More workers vs more machines</strong><p>Workers are cheaper to scale on one machine until CPU/memory or SUT capacity becomes the bottleneck. Sharding adds horizontal capacity.</p></div>
+    <div><strong>Retries vs fixing flake</strong><p>Retries improve pipeline resilience temporarily. Permanent flake reduction requires root-cause analysis.</p></div>
+    <div><strong>POM vs direct locators</strong><p>POM improves reuse and maintenance, but over-abstraction makes tests harder to understand.</p></div>
+    <div><strong>UI coverage vs API coverage</strong><p>UI gives end-to-end confidence; API/data checks provide faster, more diagnosable coverage. Optimize the portfolio, not one layer.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>12. Migration strategy: Selenium/Cypress → Playwright</h2>
+  <ol>
+    <li><b>Baseline:</b> measure suite time, flake rate, coverage and business-critical journeys.</li>
+    <li><b>Define target architecture:</b> fixtures, POM/component model, API clients, auth strategy and reporting.</li>
+    <li><b>Pilot:</b> migrate a representative smoke/regression slice, not only easy tests.</li>
+    <li><b>Dual run:</b> keep the existing suite as the safety net while Playwright proves stability.</li>
+    <li><b>Prioritize:</b> migrate high-value, high-maintenance and frequently executed scenarios first.</li>
+    <li><b>Scale CI:</b> introduce workers, sharding and artifact/report strategy.</li>
+    <li><b>Retire:</b> remove duplicate legacy tests only after equivalent coverage and stable production evidence.</li>
+  </ol>
+  <div class="callout"><b>Architect answer:</b> “I would not migrate 5,000 tests blindly. I would migrate by business risk and execution value while running both suites during the transition to avoid disrupting releases.”</div>
+</section>
+
+<section>
+  <h2>13. A strong Playwright config baseline</h2>
+  <pre><code>import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 6 : undefined,
+
+  reporter: [
+    ['html', { open: 'never' }],
+    ['junit', { outputFile: 'results/results.xml' }]
+  ],
+
+  use: {
+    baseURL: process.env.BASE_URL,
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+    actionTimeout: 10_000,
+    navigationTimeout: 30_000
+  },
+
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } }
+  ]
+});</code></pre>
+</section>
+
+<section>
+  <h2>14. Interview-ready mental model</h2>
+  <div class="card">
+    <p><span class="good">1. Isolate</span> → BrowserContext</p>
+    <p><span class="good">2. Compose</span> → Fixtures</p>
+    <p><span class="good">3. Encapsulate</span> → Page/component objects</p>
+    <p><span class="good">4. Accelerate</span> → API setup + parallel workers + sharding</p>
+    <p><span class="good">5. Stabilize</span> → condition-based assertions + root-cause flake reduction</p>
+    <p><span class="good">6. Observe</span> → trace + reports + CI artifacts</p>
+    <p><span class="good">7. Govern</span> → quality gates + measurable engineering metrics</p>
+  </div>
+  <div class="callout"><b>One-line architect summary:</b> “I design Playwright as a layered, CI-first quality platform where tests express business behavior, fixtures manage dependencies, contexts provide isolation, APIs accelerate setup, and workers/shards provide scalable execution—with observability and quality gates built in.”</div>
+</section>
+</main>
+
+<footer>Playwright Architecture Deep Dive · Designed as an interview + enterprise framework reference</footer>
+</body>
+</html>
