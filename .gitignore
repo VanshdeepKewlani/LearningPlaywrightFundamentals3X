@@ -6,3 +6,9 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+.env
+# stray codegen screenshots
+abc.png
+
+# macOS
+.DS_Store
