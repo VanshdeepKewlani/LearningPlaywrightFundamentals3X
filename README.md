@@ -123,7 +123,10 @@ LearningPlaywrightFundamentals3x/
 │   ├── 03_Locator_Commands/
 │   │   ├── 225_LC.spec.ts            # goto options: waitUntil, timeout, referer
 │   │   ├── 226_Refere.spec.ts        # context-wide referer via extraHTTPHeaders
-│   │   └── 227_Fresh.spec.ts         # CSS selectors on the VWO login form
+│   │   ├── 227_Fresh.spec.ts         # CSS selectors on the VWO login form
+│   │   ├── 228_Project3.spec.ts      # XPath, strict mode and .first()
+│   │   ├── 229_getByRole.spec.ts     # role locators on the VWO login form
+│   │   └── 230_getByRole.spec.ts     # role locators, link vs button
 │   └── 04_.. 23_/             # remaining topics, see the curriculum table
 ├── docs/images/               # architecture diagram (png + html source)
 ├── playwright.config.ts       # testDir, reporter, trace, headless, projects
@@ -810,7 +813,132 @@ Two habits worth carrying out of this file: `page.pause()` is a debugging tool t
 
 ---
 
-## 18. Locator cheat sheet
+## 18. XPath, strict mode and why `.first()` shows up
+
+**Concept:** Playwright accepts XPath anywhere a selector is expected (any string starting with `//` is treated as XPath), and it runs every locator in **strict mode**: if a locator matches more than one element, the action throws instead of silently picking one.
+
+**Why:** Silently acting on "the first thing that matched" is how a test ends up clicking the wrong button for six months without anyone noticing; strict mode turns that into a loud failure on day one.
+
+**Q&A - why use this?**
+- **Q: When do I reach for XPath?** A: Rarely. Its one real advantage is matching on text or walking upward to a parent (`//div[contains(@class,'invalid-reason')]`), which CSS cannot do.
+- **Q: What does `.first()` actually mean?** A: It opts that locator out of strict mode. It is an admission that the selector matches several elements and you decided the first one is fine.
+- **Q: What's the gotcha?** A: `.first()` hides the ambiguity rather than fixing it. If the page order changes, the test silently targets a different element. Prefer narrowing the selector, and use `.filter({ hasText })` when you need to disambiguate by content.
+
+```mermaid
+flowchart TD
+    A["page.locator&#40;selector&#41;"] --> B{How many<br/>elements match?}
+    B -->|exactly 1| C[Action runs]
+    B -->|0| D[Waits, then times out]
+    B -->|2 or more| E[Strict mode violation]
+    E --> F["Narrow the selector<br/>best fix"]
+    E --> G[".filter&#40;{ hasText }&#41;<br/>disambiguate by content"]
+    E --> H[".first&#40;&#41; / .nth&#40;i&#41;<br/>escape hatch"]
+```
+
+**tests/03_Locator_Commands/228_Project3.spec.ts** - XPath, attribute selectors and `.first()` on the Wingify trial form:
+
+```ts
+test("Verify the error message in the wingify free trial", async ({ page }) => {
+    await page.goto("https://wingify.com/free-trial/");
+
+    await page.locator("//input[@id='free-trial-step1-email']").fill("abccd");
+    await page.locator("[data-qa='free-trial-step1-gdpr-consent-checkboxgdpr-consent-checkbox']").click();
+
+    const errorMessage = page.locator("//div[contains(@class,'invalid-reason')]").first();
+    await page.locator("//button[@data-qa='page-su-submit']").first().click();
+
+    await expect(errorMessage).toContainText("The email address you entered is incorrect.");
+});
+```
+
+**The one change worth making here.** The original file reads the text first and asserts on the string:
+
+```ts
+const text = await errorMessage.textContent();   // reads once, right now
+expect(text).toContain("The email address you entered is incorrect.");
+```
+
+That assertion does not retry. It samples the DOM at the instant it runs, so if the error renders 50ms later the test fails on `null`. The web-first form polls until it matches or times out:
+
+```ts
+await expect(errorMessage).toContainText("The email address you entered is incorrect.");
+```
+
+| Form | Retries? | Use it when |
+|---|:---:|---|
+| `await expect(locator).toContainText(...)` | yes | almost always |
+| `expect(await locator.textContent()).toContain(...)` | no | you need the raw string for other logic |
+
+Since `//input[@id='free-trial-step1-email']` is just `#free-trial-step1-email` written the long way, the same selectors in idiomatic form:
+
+```ts
+page.locator("#free-trial-step1-email")              // instead of //input[@id='...']
+page.getByRole('button', { name: 'Start free trial' })  // instead of //button[@data-qa='...']
+```
+
+---
+
+## 19. `getByRole`: the accessibility-first locator
+
+**Concept:** `getByRole` finds an element by the role it plays in the accessibility tree (`link`, `button`, `textbox`, `checkbox`) plus its accessible name, which is the text a screen reader would announce for it.
+
+**Why:** Roles and labels are what the user actually perceives, so a role locator survives the CSS refactors, class renames and DOM reshuffles that break `#login-username` and `//div[contains(@class,'...')]`.
+
+**Q&A - why use this?**
+- **Q: Where does the accessible name come from?** A: Whichever the element offers first, its `aria-label`, its associated `<label>`, its `placeholder`, or its visible text. That is why `getByRole("textbox", { name: "Email" })` works on a field with no id worth using.
+- **Q: What does `exact: true` change?** A: Name matching is case-insensitive and substring-based by default, so `name: "Email"` would also match "Email Address". `exact: true` demands the whole name, matched case-sensitively.
+- **Q: What's the gotcha?** A: Get the role wrong and nothing matches. `<a>` styled as a button is still `link`, not `button`. When in doubt, use codegen's Pick locator, it reports the role Playwright actually sees.
+
+```mermaid
+flowchart TD
+    A[Element in the DOM] --> B[Accessibility tree]
+    B --> C[role<br/>link, button, textbox]
+    B --> D[accessible name<br/>aria-label > label > placeholder > text]
+    C & D --> E["getByRole&#40;role, { name, exact }&#41;"]
+    E --> F[Survives CSS and DOM refactors]
+```
+
+**tests/03_Locator_Commands/229_getByRole.spec.ts** - two text fields with no usable ids:
+
+```ts
+test("login form fields by role", async ({ page }) => {
+    await page.goto("https://app.wingify.com/#/login");
+
+    const username = page.getByRole("textbox", { name: "Email", exact: true });
+    const password = page.getByRole("textbox", { name: "Password" });
+
+    await username.fill('admin@vwo.com');
+    await password.fill('1234');
+});
+```
+
+**tests/03_Locator_Commands/230_getByRole.spec.ts** - a link, not a button, despite looking like one:
+
+```ts
+test("navigate via the Make Appointment link", async ({ page }) => {
+    await page.goto("https://katalon-demo-cura.herokuapp.com/");
+
+    const mainButton = page.getByRole("link", { name: "Make Appointment", exact: true });
+    await mainButton.click();
+
+    await expect(page).toHaveURL(/profile\.php/);
+});
+```
+
+| Element | Role | Not |
+|---|---|---|
+| `<a href="...">` | `link` | `button`, even when styled as one |
+| `<button>`, `<input type="submit">` | `button` | `link` |
+| `<input type="text\|email\|password">` | `textbox` | `input` |
+| `<input type="checkbox">` | `checkbox` | `button` |
+| `<select>` | `combobox` | `dropdown` |
+| `<h1>` ... `<h6>` | `heading` | `title` |
+
+This is the top of the preference order from section 20. Reach for CSS (section 17) only when no role or label reaches the element, and for XPath (section 18) only when you need text matching or a parent walk.
+
+---
+
+## 20. Locator cheat sheet
 
 ```ts
 page.getByRole('button', { name: 'Submit' })   // preferred, accessibility based
@@ -826,11 +954,11 @@ page.locator('li').nth(2)
 page.locator('table tr').first()
 ```
 
-Order of preference: role -> label -> placeholder -> text -> testid -> CSS/XPath. Section 17 covers the CSS end of that list, for the cases where the user-facing locators cannot reach the element.
+Order of preference: role -> label -> placeholder -> text -> testid -> CSS/XPath. Section 19 covers the role end of that list, sections 17 and 18 cover CSS and XPath, for the cases where the user-facing locators cannot reach the element.
 
 ---
 
-## 19. Common assertions
+## 21. Common assertions
 
 ```ts
 await expect(page).toHaveTitle(/Playwright/);
@@ -847,7 +975,7 @@ All `expect` calls auto-wait, so you rarely need `waitForTimeout`.
 
 ---
 
-## 20. Troubleshooting
+## 22. Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
@@ -860,7 +988,7 @@ All `expect` calls auto-wait, so you rarely need `waitForTimeout`.
 
 ---
 
-## 21. Useful links
+## 23. Useful links
 
 - Playwright docs: https://playwright.dev/docs/intro
 - Codegen guide: https://playwright.dev/docs/codegen
