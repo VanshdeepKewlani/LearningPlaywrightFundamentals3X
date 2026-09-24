@@ -127,10 +127,28 @@ LearningPlaywrightFundamentals3x/
 │   │   ├── 228_Project3.spec.ts      # XPath, strict mode and .first()
 │   │   ├── 229_getByRole.spec.ts     # role locators on the VWO login form
 │   │   └── 230_getByRole.spec.ts     # role locators, link vs button
-│   └── 04_.. 23_/             # remaining topics, see the curriculum table
+│   ├── 04_Session_Storage/
+│   │   ├── 231_SessionStorage.ts     # log in once, save cookies + localStorage
+│   │   └── 232_TestWingify.spec.ts   # three tests reusing the saved session
+│   ├── 05_Allure_Reporting/
+│   │   ├── 233_Custom_Report_TestWingify.spec.ts  # run against the custom reporter
+│   │   └── 234_Media_Custom_Report.spec.ts        # screenshot + video + trace
+│   ├── 06_Multiple_Element_Filter/
+│   │   ├── 235_ME.spec.ts            # allInnerTexts, then act on a match
+│   │   └── 236_ME.spec.ts            # all() -> Locator[], read href per link
+│   ├── 07_WebTables/
+│   │   ├── 237_TestCase.spec.ts      # row loop, cells via allInnerTexts
+│   │   └── 238_TestCase.spec.ts      # dynamic XPath + following-sibling
+│   └── 08_.. 23_/             # remaining topics, see the curriculum table
+├── template/template.spec.ts  # starting skeleton for a new spec
+├── ai/                        # RCA + flaky-analysis agents used by the reporter
+├── utils/CustomReporter.ts    # custom HTML reporter (TTA branded)
 ├── docs/images/               # architecture diagram (png + html source)
 ├── playwright.config.ts       # testDir, reporter, trace, headless, projects
 ├── package.json
+├── .env.example               # copy to .env and fill in credentials
+├── tta-report/                # custom reporter output (git ignored)
+├── allure-results/            # allure raw results (git ignored)
 ├── playwright-report/         # generated HTML report (git ignored)
 ├── test-results/              # traces, screenshots, videos (git ignored)
 └── README.md
@@ -222,6 +240,32 @@ The two library scripts in `01_Basics/` are not specs, so the runner skips them.
 ```bash
 npx tsx tests/01_Basics/218_normal_pw.ts
 npx tsx tests/01_Basics/217_multiple_context.ts
+npx tsx tests/04_Session_Storage/231_SessionStorage.ts   # saves user-session.json
+```
+
+### Starting a new test
+
+`template/template.spec.ts` is the skeleton every lesson starts from. Copy it, change the title and the URL, and write the body where the `// Code` marker sits:
+
+```ts
+import { test, expect, Locator } from '@playwright/test';
+
+test('Verify the TestCase', async ({ page }) => {
+   await page.goto("https://app.thetestingacademy.com/playwright/multiple_element_filter");
+
+    // Code
+
+   await page.pause();
+});
+```
+
+`page.pause()` opens the Inspector so you can step through and pick locators while writing. Remove it before committing, it halts the run.
+
+Run a file against the custom reporter instead of the configured ones:
+
+```bash
+npx playwright test tests/05_Allure_Reporting/234_Media_Custom_Report.spec.ts \
+    --reporter=./utils/CustomReporter.ts
 ```
 
 Open the report after a run:
@@ -628,7 +672,87 @@ npx playwright test -g "Login Page"
 
 ---
 
-## 13. playwright.config.ts explained
+## 13. Session storage: log in once, reuse everywhere
+
+**Concept:** `context.storageState({ path })` writes the browser's cookies and localStorage to a JSON file, and `storageState: './user-session.json'` on a new context loads them back, so the test starts already logged in.
+
+**Why:** Driving the login form at the top of every test is the single biggest time sink in an authenticated suite, and it makes every test depend on the login page still working.
+
+**Q&A - why use this?**
+- **Q: When do I reach for it?** A: Any suite where most tests need a logged-in user. Log in once in a setup script, then every spec reuses the state.
+- **Q: What does it replace?** A: A `beforeEach` that fills the login form. Twenty tests means twenty logins; this makes it one.
+- **Q: What's the gotcha?** A: The file holds live session cookies. It must be gitignored, it expires when the real session does, and it is environment-specific. Regenerate it when tests start failing at the login redirect.
+
+```mermaid
+flowchart LR
+    A["231: log in once<br/>chromium script"] --> B["context.storageState&#40;{ path }&#41;"]
+    B --> C[(user-session.json<br/>cookies + localStorage)]
+    C --> D["232: test.use&#40;{ storageState }&#41;"]
+    D --> E[Test 1<br/>already logged in]
+    D --> F[Test 2<br/>already logged in]
+    D --> G[Test 3<br/>already logged in]
+```
+
+**tests/04_Session_Storage/231_SessionStorage.ts** - the one-time login that saves the state. Credentials come from `.env`, never from the source:
+
+```ts
+import { chromium } from 'playwright';
+import dotenv from "dotenv";
+dotenv.config();
+
+async function saveSession() {
+    const browser = await chromium.launch({ headless: false });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    await page.goto("https://app.wingify.com/#/login");
+    await page.fill("#login-username", process.env.VWO_USER!);
+    await page.fill("#login-password", process.env.VWO_PASS!);
+    await page.click("#js-login-btn");
+    await page.waitForURL(/#\/(dashboard|home)/, { timeout: 15000 });
+
+    await context.storageState({ path: "./user-session.json" });
+    await browser.close();
+}
+saveSession();
+```
+
+It is a library script, not a spec, so run it directly:
+
+```bash
+npx tsx tests/04_Session_Storage/231_SessionStorage.ts
+```
+
+**tests/04_Session_Storage/232_TestWingify.spec.ts** - `test.use` at the top of the file applies the saved state to every test in it:
+
+```ts
+test.use({ storageState: './user-session.json' });
+
+test("go directly to dashboard - no login", async ({ page }) => {
+    await page.goto("https://app.wingify.com/#/dashboard?accountId=1281316");
+    await expect(page).toHaveURL(/dashboard/);
+});
+```
+
+Proof that it works, the same URL with and without the saved state:
+
+| | With `storageState` | Clean context |
+|---|---|---|
+| Lands on | `#/dashboard?accountId=...` | `#/login` |
+| Login field visible | no | yes |
+
+**Two rules that matter.** Add the state file and your `.env` to `.gitignore`, both contain live credentials:
+
+```
+.env
+user-session.json
+```
+
+And commit a `.env.example` with empty values so a cloner knows which variables to set.
+
+---
+
+## 14. playwright.config.ts explained
 
 ```ts
 export default defineConfig({
@@ -637,7 +761,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,    // fail CI if test.only is left behind
   retries: process.env.CI ? 2 : 0, // retry flaky tests on CI only
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',                // HTML report in playwright-report/
+  reporter: [["line"], ["allure-playwright"], ["./utils/CustomReporter.ts"]],
   use: {
     trace: 'on-first-retry',       // record a trace when a test retries
     headless: false                // show the browser locally
@@ -660,7 +784,85 @@ projects: [
 
 ---
 
-## 14. Traces and debugging
+## 15. Reporters: Allure, and writing your own
+
+**Concept:** A reporter is a class implementing Playwright's `Reporter` interface, with hooks (`onTestBegin`, `onTestEnd`, `onEnd`) that fire as the run progresses. The `reporter` config key takes a list, so several can run at once.
+
+**Why:** The built-in HTML report is fine for one developer, but a team usually wants run history, a branded summary, or results pushed somewhere, and that means owning the output.
+
+**Q&A - why use this?**
+- **Q: Can I run more than one reporter?** A: Yes, that is why the key takes an array. `[["line"], ["allure-playwright"]]` gives terminal output and Allure results from a single run.
+- **Q: How do I get screenshots, video and traces into a custom report?** A: They arrive as attachments on `TestResult`. Turn them on first (`screenshot`, `video`, `trace`), then read `result.attachments` in `onTestEnd` and copy each file somewhere the HTML can link to.
+- **Q: What's the gotcha?** A: `onTestBegin` and `onTestEnd` interleave under `fullyParallel`. Any counter you bump in `onTestBegin` has already moved on by the time `onTestEnd` runs, so never use it to name that test's files. Key off `test.id` instead.
+
+```mermaid
+flowchart TD
+    A[Test run starts] --> B[onBegin]
+    B --> C[onTestBegin<br/>per test]
+    C --> D[onStepEnd<br/>per step]
+    D --> E[onTestEnd<br/>result.attachments]
+    E --> F{attachment type}
+    F -->|image/png| G[screenshots/]
+    F -->|video/webm| H[videos/]
+    F -->|name === trace| I[traces/]
+    E --> J[onEnd<br/>write the HTML]
+```
+
+This repo's config runs two reporters:
+
+```ts
+reporter: [["line"], ["allure-playwright"]],
+```
+
+All three are configured, so a normal `npx playwright test` produces terminal output, Allure results and the TTA HTML report in one pass. To run *only* the custom one:
+
+```bash
+npx playwright test tests/05_Allure_Reporting/234_Media_Custom_Report.spec.ts \
+    --reporter=./utils/CustomReporter.ts
+```
+
+**Capturing media.** Screenshots, video and traces are off by default. Turn all three on for a file with `test.use`, exactly as **tests/05_Allure_Reporting/234_Media_Custom_Report.spec.ts** does:
+
+```ts
+test.use({
+    storageState: './user-session.json',
+    screenshot: 'on',   // a PNG per test, pass or fail
+    video: 'on',        // a .webm per test
+    trace: 'on',        // a trace.zip per test
+});
+
+test('dashboard loads with media captured', async ({ page }, testInfo) => {
+    await test.step('open the dashboard', async () => {
+        await page.goto("https://app.wingify.com/#/dashboard?accountId=1281316");
+        await expect(page).toHaveURL(/dashboard/);
+    });
+
+    await testInfo.attach('dashboard', {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: 'image/png',
+    });
+});
+```
+
+`test.step()` blocks are worth the two extra lines: the reporter receives each one through `onStepEnd`, so the report shows a timed breakdown instead of one opaque test.
+
+| Setting | Values | Cost |
+|---|---|---|
+| `screenshot` | `off`, `on`, `only-on-failure` | small |
+| `video` | `off`, `on`, `retain-on-failure` | large, a webm per test |
+| `trace` | `off`, `on`, `on-first-retry`, `retain-on-failure` | largest, ~1.3MB per test |
+
+For real suites prefer `only-on-failure` and `on-first-retry`, which is what the repo config uses by default. `on` is for when you are demonstrating the report itself.
+
+Generated output (`tta-report/`, `allure-results/`, `reports/`) is gitignored. To view the Allure report:
+
+```bash
+npx allure generate allure-results --clean -o allure-report && npx allure open allure-report
+```
+
+---
+
+## 16. Traces and debugging
 
 ```bash
 # force a trace for every test
@@ -674,7 +876,7 @@ The trace viewer gives you a DOM snapshot per action, network calls, console log
 
 ---
 
-## 15. VS Code extension
+## 17. VS Code extension
 
 Install **Playwright Test for VSCode** (Microsoft). It gives you:
 
@@ -685,7 +887,7 @@ Install **Playwright Test for VSCode** (Microsoft). It gives you:
 
 ---
 
-## 16. Navigation: `page.goto()` options and referers
+## 18. Navigation: `page.goto()` options and referers
 
 **Concept:** `page.goto()` takes an options object that decides how long Playwright waits before handing control back (`waitUntil`), how long it waits before giving up (`timeout`), and what `Referer` header the request carries.
 
@@ -750,7 +952,7 @@ test("set referer for entire context", async ({ browser }) => {
 
 ---
 
-## 17. CSS selectors and the default locator strategies
+## 19. CSS selectors and the default locator strategies
 
 **Concept:** Before Playwright's `getByRole` family there were four classic hooks on an element, `id`, `name`, `class` and tag, and CSS selector syntax is how you reach each of them through `page.locator()`.
 
@@ -813,7 +1015,7 @@ Two habits worth carrying out of this file: `page.pause()` is a debugging tool t
 
 ---
 
-## 18. XPath, strict mode and why `.first()` shows up
+## 20. XPath, strict mode and why `.first()` shows up
 
 **Concept:** Playwright accepts XPath anywhere a selector is expected (any string starting with `//` is treated as XPath), and it runs every locator in **strict mode**: if a locator matches more than one element, the action throws instead of silently picking one.
 
@@ -878,7 +1080,7 @@ page.getByRole('button', { name: 'Start free trial' })  // instead of //button[@
 
 ---
 
-## 19. `getByRole`: the accessibility-first locator
+## 21. `getByRole`: the accessibility-first locator
 
 **Concept:** `getByRole` finds an element by the role it plays in the accessibility tree (`link`, `button`, `textbox`, `checkbox`) plus its accessible name, which is the text a screen reader would announce for it.
 
@@ -934,11 +1136,157 @@ test("navigate via the Make Appointment link", async ({ page }) => {
 | `<select>` | `combobox` | `dropdown` |
 | `<h1>` ... `<h6>` | `heading` | `title` |
 
-This is the top of the preference order from section 20. Reach for CSS (section 17) only when no role or label reaches the element, and for XPath (section 18) only when you need text matching or a parent walk.
+This is the top of the preference order from section 24. Reach for CSS (section 19) only when no role or label reaches the element, and for XPath (section 20) only when you need text matching or a parent walk.
 
 ---
 
-## 20. Locator cheat sheet
+## 22. Multiple elements: `all()`, `allInnerTexts()`, `allTextContents()`
+
+**Concept:** A locator that matches many elements can be unpacked three ways, `all()` hands back an array of locators you can act on, while `allInnerTexts()` and `allTextContents()` hand back plain strings in one round trip.
+
+**Why:** Reading thirteen link labels one `textContent()` at a time costs thirteen round trips to the browser; the plural getters do it in one.
+
+**Q&A - why use this?**
+- **Q: When do I reach for `all()`?** A: Only when you need to *do* something per element, click it, read an attribute, assert on it. If you just want the text, the plural getters are one call instead of N.
+- **Q: `allInnerTexts` or `allTextContents`?** A: `allTextContents` returns raw DOM text, so whitespace is exactly as authored, which makes it predictable to compare against. `allInnerTexts` returns what is rendered, collapsed and trimmed, with CSS `text-transform` applied and `<br>` turned into `\n`.
+- **Q: What's the gotcha?** A: None of the three wait. They snapshot whatever is in the DOM at that instant, so on a list that is still loading you silently get a partial answer.
+
+```mermaid
+flowchart TD
+    A["page.locator&#40;'a.list-group-item'&#41;"] --> B{What do you need?}
+    B -->|act on each element| C["all&#40;&#41; -> Locator[]"]
+    B -->|text the user sees| D["allInnerTexts&#40;&#41; -> string[]"]
+    B -->|raw DOM text| E["allTextContents&#40;&#41; -> string[]"]
+    C --> F[click, getAttribute, fill]
+    D --> G[collapsed, CSS applied]
+    E --> H[as authored, faster]
+```
+
+| | `all()` | `allInnerTexts()` | `allTextContents()` |
+|---|---|---|---|
+| Returns | `Locator[]` | `string[]` | `string[]` |
+| Can click / getAttribute | yes | no | no |
+| Whitespace | n/a | collapsed, trimmed | raw |
+| CSS `text-transform` | n/a | applied | ignored |
+| `<br>` | n/a | becomes `\n` | ignored |
+| Waits for elements | no | no | no |
+| Round trips | 1 + N per action | 1 | 1, cheapest |
+
+The same four elements through both getters make the difference concrete:
+
+```
+allTextContents : ["   Alpha\n     line-two   ", "Hidden Beta", "gamma", "DeltaEpsilon"]
+allInnerTexts   : ["Alpha line-two",             "Hidden Beta", "GAMMA", "Delta\nEpsilon"]
+```
+
+**tests/06_Multiple_Element_Filter/235_ME.spec.ts** - read the labels once, then act on a match:
+
+```ts
+const links = page.locator('a.list-group-item');
+const labels: string[] = await links.allInnerTexts();
+
+for (const label of labels) {
+    if (label === "Forgotten Password") {
+        await page.getByText(label).first().click();
+    }
+}
+```
+
+**tests/06_Multiple_Element_Filter/236_ME.spec.ts** - `all()`, because `getAttribute` needs real locators:
+
+```ts
+const links: Locator[] = await page.locator('a.list-group-item').all();
+for (const link of links) {
+    console.log(await link.getAttribute('href'));
+}
+```
+
+**Gate on the count first.** Because none of the three wait, a list that renders late gives a partial result with no error:
+
+```ts
+const links = page.locator('a.list-group-item');
+await expect(links).toHaveCount(13);      // this one retries
+const all = await links.all();            // now it is safe
+```
+
+And when you are asserting rather than logging, skip all three, `toHaveText` accepts an array and auto-retries:
+
+```ts
+await expect(links).toHaveText([/Login/, /Register/]);
+```
+
+---
+
+## 23. Web tables: iterating rows and columns
+
+**Concept:** An HTML table has no table API in Playwright, it is just nested locators, so you read it by locating rows (`tbody tr`) and then cells (`td`) within each row.
+
+**Why:** Table data is dynamic, you rarely know which row holds the record you want, so you scan rows until a cell matches and then read its neighbours.
+
+**Q&A - why use this?**
+- **Q: How do I skip the header row?** A: Prefer scoping to `tbody tr` and using `th` for headers. If the header sits inside `tbody`, start the loop at index 1 rather than 0.
+- **Q: Do I need XPath for tables?** A: Only for one thing, walking sideways. `following-sibling::td` gets the next cell from a matched cell, which CSS cannot express.
+- **Q: What's the gotcha?** A: Building selectors by string concatenation re-queries the DOM on every iteration and is slow and brittle. Chain locators off the row instead, and remember XPath indexes are 1-based while `nth()` is 0-based.
+
+```mermaid
+flowchart TD
+    A["page.locator&#40;'table tbody tr'&#41;"] --> B["count&#40;&#41; -> how many rows"]
+    B --> C[loop rows by index]
+    C --> D["rows.nth&#40;i&#41;.locator&#40;'td'&#41;"]
+    D --> E["allInnerTexts&#40;&#41; -> one row as string[]"]
+    D --> F{cell matches<br/>what you want?}
+    F -->|yes| G["following-sibling::td<br/>read the neighbour"]
+```
+
+**tests/07_WebTables/237_TestCase.spec.ts** - the readable approach, one call per row:
+
+```ts
+const rows = page.locator('table[summary="Sample Table"] tbody tr');
+const rowCount = await rows.count();
+
+for (let i = 0; i < rowCount - 1; i++) {
+    const rowData = await rows.nth(i).locator('td').allInnerTexts();
+    console.log(`Row ${i + 1}:`, rowData);
+}
+```
+
+**tests/07_WebTables/238_TestCase.spec.ts** - find a record, then read the cell beside it with `following-sibling`:
+
+```ts
+const rows = await page.locator("//table[@id='customers']/tbody/tr").count();
+const cols = await page.locator("//table[@id='customers']/tbody/tr[2]/td").count();
+
+for (let i = 2; i <= rows; i++) {            // XPath rows are 1-based, row 1 is the header
+    for (let j = 1; j <= cols; j++) {
+        const cell = `//table[@id='customers']/tbody/tr[${i}]/td[${j}]`;
+        const data = await page.locator(cell).innerText();
+
+        if (data.includes('Helen Bennett')) {
+            const country = await page.locator(`${cell}/following-sibling::td`).innerText();
+            console.log(`Helen Bennett is In - ${country}`);
+        }
+    }
+}
+```
+
+| Approach | Round trips | Readability |
+|---|---|---|
+| `rows.nth(i).locator('td').allInnerTexts()` | 1 per row | high |
+| String-built XPath per cell | 1 per **cell** | low |
+
+The nested-loop version is the one taught in class because it makes the row/column maths explicit, but in a real suite the first form is what you want. The whole scan also collapses into a single chained locator:
+
+```ts
+const country = await page.locator('#customers tbody tr')
+    .filter({ hasText: 'Helen Bennett' })
+    .locator('td')
+    .last()
+    .innerText();
+```
+
+---
+
+## 24. Locator cheat sheet
 
 ```ts
 page.getByRole('button', { name: 'Submit' })   // preferred, accessibility based
@@ -954,11 +1302,11 @@ page.locator('li').nth(2)
 page.locator('table tr').first()
 ```
 
-Order of preference: role -> label -> placeholder -> text -> testid -> CSS/XPath. Section 19 covers the role end of that list, sections 17 and 18 cover CSS and XPath, for the cases where the user-facing locators cannot reach the element.
+Order of preference: role -> label -> placeholder -> text -> testid -> CSS/XPath. Section 21 covers the role end of that list, sections 19 and 20 cover CSS and XPath, for the cases where the user-facing locators cannot reach the element.
 
 ---
 
-## 21. Common assertions
+## 25. Common assertions
 
 ```ts
 await expect(page).toHaveTitle(/Playwright/);
@@ -975,7 +1323,7 @@ All `expect` calls auto-wait, so you rarely need `waitForTimeout`.
 
 ---
 
-## 22. Troubleshooting
+## 26. Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
@@ -988,7 +1336,7 @@ All `expect` calls auto-wait, so you rarely need `waitForTimeout`.
 
 ---
 
-## 23. Useful links
+## 27. Useful links
 
 - Playwright docs: https://playwright.dev/docs/intro
 - Codegen guide: https://playwright.dev/docs/codegen
