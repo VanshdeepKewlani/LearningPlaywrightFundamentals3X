@@ -109,6 +109,8 @@ npx playwright install
 ```
 LearningPlaywrightFundamentals3x/
 ├── tests/                     # numbered curriculum, one folder per topic (see section 5)
+│   ├── CodingTests/
+│   │   └── SearchDSLRInFlipkart.spec.ts  # searches Flipkart and logs DSLR product names and prices
 │   ├── 01_Basics/
 │   │   ├── 216_example.spec.ts       # title assertions on playwright.dev (viewer + admin)
 │   │   ├── 217_multiple_context.ts   # two isolated sessions in one browser
@@ -212,6 +214,9 @@ npx playwright test
 
 # run a single file
 npx playwright test tests/01_Basics/219_tta-check.spec.ts
+
+# run the Flipkart DSLR search exercise
+npx playwright test tests/CodingTests/SearchDSLRInFlipkart.spec.ts
 
 # run one test by title
 npx playwright test -g "admin"
