@@ -110,7 +110,9 @@ npx playwright install
 LearningPlaywrightFundamentals3x/
 ├── tests/                     # numbered curriculum, one folder per topic (see section 5)
 │   ├── CodingTests/
-│   │   └── SearchDSLRInFlipkart.spec.ts  # searches Flipkart and logs DSLR product names and prices
+│   │   ├── SearchDSLRInFlipkart.spec.ts  # searches Flipkart and logs DSLR product names and prices
+│   │   ├── QAProfileForm.spec.ts         # submits and verifies a QA profile form
+│   │   └── AutomateOrangeHRM.spec.ts     # logs in and creates an OrangeHRM employee
 │   ├── 01_Basics/
 │   │   ├── 216_example.spec.ts       # title assertions on playwright.dev (viewer + admin)
 │   │   ├── 217_multiple_context.ts   # two isolated sessions in one browser
@@ -217,6 +219,12 @@ npx playwright test tests/01_Basics/219_tta-check.spec.ts
 
 # run the Flipkart DSLR search exercise
 npx playwright test tests/CodingTests/SearchDSLRInFlipkart.spec.ts
+
+# submit and verify the QA profile form
+npx playwright test tests/CodingTests/QAProfileForm.spec.ts
+
+# log in to OrangeHRM and create an employee
+npx playwright test tests/CodingTests/AutomateOrangeHRM.spec.ts
 
 # run one test by title
 npx playwright test -g "admin"
@@ -768,6 +776,8 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: [["line"], ["allure-playwright"], ["./utils/CustomReporter.ts"]],
   use: {
+        screenshot: 'only-on-failure',
+        video: 'retain-on-failure',
     trace: 'on-first-retry',       // record a trace when a test retries
     headless: false                // show the browser locally
   },
@@ -813,20 +823,20 @@ flowchart TD
     E --> J[onEnd<br/>write the HTML]
 ```
 
-This repo's config runs two reporters:
+This repo's config runs the line and Allure reporters:
 
 ```ts
 reporter: [["line"], ["allure-playwright"]],
 ```
 
-All three are configured, so a normal `npx playwright test` produces terminal output, Allure results and the TTA HTML report in one pass. To run *only* the custom one:
+The normal `npx playwright test` command produces terminal output and Allure results. The custom TTA reporter can be selected for a run with:
 
 ```bash
 npx playwright test tests/05_Allure_Reporting/234_Media_Custom_Report.spec.ts \
     --reporter=./utils/CustomReporter.ts
 ```
 
-**Capturing media.** Screenshots, video and traces are off by default. Turn all three on for a file with `test.use`, exactly as **tests/05_Allure_Reporting/234_Media_Custom_Report.spec.ts** does:
+**Capturing media.** The repo config keeps screenshots and video for failed tests, and records traces on the first retry. Override these settings for a file with `test.use`, exactly as **tests/05_Allure_Reporting/234_Media_Custom_Report.spec.ts** does:
 
 ```ts
 test.use({
