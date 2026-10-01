@@ -112,7 +112,8 @@ LearningPlaywrightFundamentals3x/
 │   ├── CodingTests/
 │   │   ├── SearchDSLRInFlipkart.spec.ts  # searches Flipkart and logs DSLR product names and prices
 │   │   ├── QAProfileForm.spec.ts         # submits and verifies a QA profile form
-│   │   └── AutomateOrangeHRM.spec.ts     # logs in and creates an OrangeHRM employee
+│   │   ├── AutomateOrangeHRM.spec.ts     # logs in and creates an OrangeHRM employee
+│   │   └── AutomateHoverMenus.spec.ts    # selects a Wi-Fi item from a hover menu
 │   ├── 01_Basics/
 │   │   ├── 216_example.spec.ts       # title assertions on playwright.dev (viewer + admin)
 │   │   ├── 217_multiple_context.ts   # two isolated sessions in one browser
@@ -225,6 +226,9 @@ npx playwright test tests/CodingTests/QAProfileForm.spec.ts
 
 # log in to OrangeHRM and create an employee
 npx playwright test tests/CodingTests/AutomateOrangeHRM.spec.ts
+
+# select an item from a hover menu
+npx playwright test tests/CodingTests/AutomateHoverMenus.spec.ts
 
 # run one test by title
 npx playwright test -g "admin"
