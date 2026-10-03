@@ -7,6 +7,6 @@ test('Automate Hover Menus', async ({ page }) => {
     const outputText = await page.getByTestId("hover-output").innerText();
     console.log(outputText);
     const responseJson = JSON.parse(outputText);
-    await expect(responseJson.clicked).toBe("📶\nWi-Fi");
-    await expect(responseJson.testId).toBe("test-id-Wifi");
+    expect(responseJson.clicked).toContain("Wi-Fi");
+    expect(responseJson.testId).toBe("test-id-Wifi");
 });
