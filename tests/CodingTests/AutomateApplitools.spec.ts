@@ -17,11 +17,3 @@ test('Automate Applitools', async ({ page }) => {
 
     expect(total).toBeCloseTo(1996.22, 2);
 });
-
-
-
-
-
-
-
-

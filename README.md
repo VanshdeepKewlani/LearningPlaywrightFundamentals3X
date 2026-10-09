@@ -115,6 +115,9 @@ LearningPlaywrightFundamentals3x/
 │   │   ├── AutomateOrangeHRM.spec.ts     # logs in and creates an OrangeHRM employee
 │   │   ├── AutomateHoverMenus.spec.ts    # selects a Wi-Fi item from a hover menu
 │   │   ├── AutomateApplitools.spec.ts    # logs into Applitools and checks net transaction total
+│   │   ├── ProfilePicUpdate.spec.ts      # updates the profile picture on the TTA practice site
+│   │   ├── ShadowDOM.spec.ts             # interacts with regular and closed shadow-root controls
+│   │   ├── WebTable.spec.ts              # finds an employee row and checks its checkbox
 │   │   └── utils.ts                      # sums earned and spent transaction amounts
 │   ├── 01_Basics/
 │   │   ├── 216_example.spec.ts       # title assertions on playwright.dev (viewer + admin)
@@ -178,6 +181,9 @@ LearningPlaywrightFundamentals3x/
 ├── allure-results/            # allure raw results (git ignored)
 ├── playwright-report/         # generated HTML report (git ignored)
 ├── test-results/              # traces, screenshots, videos (git ignored)
+├── WP_20150701_004.jpg        # image fixtures for the profile picture exercise
+├── WP_20150701_005.jpg
+├── WP_20150701_006.jpg
 └── README.md
 ```
 
@@ -254,6 +260,15 @@ npx playwright test tests/CodingTests/AutomateHoverMenus.spec.ts
 
 # log in to Applitools and verify the net transaction total
 npx playwright test tests/CodingTests/AutomateApplitools.spec.ts
+
+# update a profile picture (uses WP_20150701_006.jpg)
+npx playwright test tests/CodingTests/ProfilePicUpdate.spec.ts
+
+# interact with open and closed shadow-root controls
+npx playwright test tests/CodingTests/ShadowDOM.spec.ts
+
+# find an employee in a web table and select the row
+npx playwright test tests/CodingTests/WebTable.spec.ts
 
 # run one test by title
 npx playwright test -g "admin"
